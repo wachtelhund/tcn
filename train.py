@@ -259,6 +259,42 @@ def plot_predictions(model, test_loader, scalers, target_features):
     # Define colors for different sensors
     colors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink', 'gray', 'olive', 'cyan']
     
+    # Measure inference time
+    print("Measuring inference speed...")
+    
+    # Measure full model inference (all sensors)
+    test_batch = next(iter(test_loader))[0]  # Get a single batch
+    
+    # Warm-up
+    with torch.no_grad():
+        for _ in range(10):
+            _ = model(test_batch.transpose(1, 2))
+    
+    # Full model timing (all sensors)
+    start_time = datetime.now()
+    with torch.no_grad():
+        for _ in range(100):
+            outputs = model(test_batch.transpose(1, 2))
+    end_time = datetime.now()
+    full_inference_time = (end_time - start_time).total_seconds() / 100  # Average time per inference
+    print(f"Average inference time (all sensors): {full_inference_time*1000:.2f} ms")
+    
+    # Per-sensor inference timing
+    for i, feature in enumerate(target_features):
+        # Create a simple wrapper to time just the extraction of one sensor's output
+        def time_single_sensor():
+            with torch.no_grad():
+                output = model(test_batch.transpose(1, 2))
+                return output[:, -1, i]  # Return just one sensor's output
+        
+        # Timing
+        start_time = datetime.now()
+        for _ in range(100):
+            _ = time_single_sensor()
+        end_time = datetime.now()
+        sensor_time = (end_time - start_time).total_seconds() / 100
+        print(f"Average inference time (Sensor {i+1}): {sensor_time*1000:.2f} ms")
+    
     if has_dates and len(dates) == len(raw_actuals):
         # Only show the forecast horizon in the plot
         limited_dates = dates[:forecast_horizon] if len(dates) > forecast_horizon else dates
@@ -320,9 +356,9 @@ def plot_predictions(model, test_loader, scalers, target_features):
         # Use integer ticks for x-axis
         plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
     
-    plt.title(f'Combined Predictions for All Sensors ({forecast_horizon}-step Forecast)')
+    plt.title(f'Actual vs. Forecasted Values (TCN) - 1 Day Ahead')
     plt.xlabel('Time')
-    plt.ylabel('Value')
+    plt.ylabel('Sensor Values')
     plt.legend()
     plt.grid(True)
     
