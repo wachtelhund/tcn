@@ -150,59 +150,22 @@ def plot_predictions(model, test_loader, scalers, target_features):
         plt.figure(figsize=(12, 6))
         
         if has_dates and len(dates) == len(actuals):
-            # Limit all plots to just the forecast horizon
+            # Only show the forecast horizon in the plot
             limited_dates = dates[:forecast_horizon] if len(dates) > forecast_horizon else dates
             limited_actuals = actuals[:forecast_horizon] if len(actuals) > forecast_horizon else actuals
             limited_preds = predictions[:forecast_horizon] if len(predictions) > forecast_horizon else predictions
             
-            # Only plot actual values within the forecast horizon
-            plt.plot(limited_dates, limited_actuals[:, i], label='Actual', color='blue')
-            
-            # Only show predictions for the specified forecast horizon
             unit = "hours" if is_hourly else "days"
             
             if is_hourly:
-                # For hourly data
-                last_actual_date = dates.iloc[-1] if len(dates) > 0 else None
-                
-                # Generate future dates
-                future_dates = None
-                if last_actual_date is not None and (isinstance(last_actual_date, datetime) or pd.api.types.is_datetime64_any_dtype(last_actual_date)):
-                    # For hourly data
-                    future_dates = [last_actual_date + timedelta(hours=h+1) for h in range(forecast_horizon)]
-                
-                # Only plot predictions up to the forecast horizon
-                plt.plot(limited_dates, limited_preds[:, i], 
-                         label=f'Predicted ({forecast_horizon} {unit})', color='red')
-                
-                # If we have future dates, plot future predictions
-                if future_dates and len(future_dates) > 0:
-                    # Generate multi-step forecast (same as before)
-                    last_x = last_batch_x[-1:].clone()
-                    future_preds = []
-                    current_input = last_x.clone()
-                    
-                    for step in range(forecast_horizon):
-                        with torch.no_grad():
-                            step_output = model(current_input.transpose(1, 2))
-                            next_pred = step_output[:, -1]
-                        
-                        future_preds.append(next_pred.numpy())
-                        
-                        if step < forecast_horizon - 1:
-                            current_input = current_input.clone()
-                            current_input = torch.cat([current_input[:, 1:, :], next_pred.unsqueeze(1)], dim=1)
-                    
-                    future_preds = np.concatenate(future_preds, axis=0)
-                    future_preds[:, i] = future_preds[:, i] * scalers[feature]['std'] + scalers[feature]['mean']
-                    
-                    plt.plot(future_dates, future_preds[:, i], 
-                             label=f'Future Forecast ({forecast_horizon} {unit})', color='green', linestyle='-')
+                # For hourly data, we'll only show the immediate prediction, not the future forecast
+                # This simplifies the plot and avoids the issue with the future forecast being too far away
+                plt.plot(limited_dates, limited_actuals[:, i], label='Actual', color='blue')
+                plt.plot(limited_dates, limited_preds[:, i], label=f'Predicted ({forecast_horizon} {unit})', color='red')
             else:
-                # For daily data, limit predictions to forecast_horizon days
-                # Plot limited predictions on actual dates
-                plt.plot(limited_dates, limited_preds[:, i], 
-                         label=f'Predicted ({forecast_horizon} {unit})', color='red')
+                # For daily data
+                plt.plot(limited_dates, limited_actuals[:, i], label='Actual', color='blue')
+                plt.plot(limited_dates, limited_preds[:, i], label=f'Predicted ({forecast_horizon} {unit})', color='red')
             
             # Format x-axis to show dates
             if is_hourly:
@@ -228,8 +191,7 @@ def plot_predictions(model, test_loader, scalers, target_features):
             x_values = range(len(limited_preds))
             
             plt.plot(x_values, limited_actuals[:, i], label='Actual')
-            plt.plot(x_values, limited_preds[:, i], 
-                     label=f'Predicted ({forecast_horizon} steps)', color='red')
+            plt.plot(x_values, limited_preds[:, i], label=f'Predicted ({forecast_horizon} steps)', color='red')
             
             # Use integer ticks for x-axis
             plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
