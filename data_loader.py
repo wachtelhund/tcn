@@ -5,6 +5,49 @@ from torch.utils.data import Dataset, DataLoader
 import os
 from config import DATA_CONFIG
 
+def add_time_features(df, date_column):
+    """
+    Add time-based features to capture temporal patterns at different scales
+    
+    Args:
+        df (pd.DataFrame): DataFrame with date column
+        date_column (str): Name of the date column
+        
+    Returns:
+        pd.DataFrame: DataFrame with added time features
+    """
+    # Create a copy to avoid modifying the original dataframe
+    result_df = df.copy()
+    
+    # Extract time components
+    result_df['hour'] = result_df[date_column].dt.hour
+    result_df['day'] = result_df[date_column].dt.day
+    result_df['day_of_week'] = result_df[date_column].dt.dayofweek  # Monday=0, Sunday=6
+    result_df['month'] = result_df[date_column].dt.month
+    result_df['year'] = result_df[date_column].dt.year
+    
+    # Create cyclical features using sine and cosine transformations
+    if DATA_CONFIG.get('add_cyclical_features', True):
+        # Hour of day (24-hour cycle)
+        result_df['hour_sin'] = np.sin(2 * np.pi * result_df['hour'] / 24)
+        result_df['hour_cos'] = np.cos(2 * np.pi * result_df['hour'] / 24)
+        
+        # Day of week (7-day cycle)
+        result_df['day_of_week_sin'] = np.sin(2 * np.pi * result_df['day_of_week'] / 7)
+        result_df['day_of_week_cos'] = np.cos(2 * np.pi * result_df['day_of_week'] / 7)
+        
+        # Month (12-month cycle)
+        result_df['month_sin'] = np.sin(2 * np.pi * result_df['month'] / 12)
+        result_df['month_cos'] = np.cos(2 * np.pi * result_df['month'] / 12)
+        
+        # Day of month normalized (28-31 day cycle)
+        days_in_month = result_df[date_column].dt.days_in_month
+        result_df['day_of_month_norm'] = result_df['day'] / days_in_month
+        result_df['day_of_month_sin'] = np.sin(2 * np.pi * result_df['day_of_month_norm'])
+        result_df['day_of_month_cos'] = np.cos(2 * np.pi * result_df['day_of_month_norm'])
+    
+    return result_df
+
 class CHPDataset(Dataset):
     def __init__(self, data, sequence_length=24, target_features=None, input_features=None):
         """
@@ -14,10 +57,15 @@ class CHPDataset(Dataset):
             target_features (list): List of target features to predict
             input_features (list): List of input features to use. If None, all non-target columns are used.
         """
-        self.data = data
+        self.data = data.copy()
         self.sequence_length = sequence_length
         self.target_features = target_features or DATA_CONFIG['target_features']
         self.is_hourly = DATA_CONFIG.get('is_hourly', False)
+        
+        # Add time-based features if enabled
+        date_column = DATA_CONFIG['date_column']
+        if DATA_CONFIG.get('add_time_features', False) and date_column in self.data.columns:
+            self.data = add_time_features(self.data, date_column)
         
         # Validate target features exist in the data
         missing_targets = [f for f in self.target_features if f not in self.data.columns]
@@ -32,9 +80,17 @@ class CHPDataset(Dataset):
             if missing_inputs:
                 raise ValueError(f"Input features not found in data: {missing_inputs}")
         else:
-            # Use all numeric columns except targets and date
-            exclude_columns = self.target_features + [DATA_CONFIG['date_column']]
+            # Use all numeric columns except targets and date/non-numeric columns
+            non_feature_columns = [date_column, 'day', 'day_of_week', 'month', 'year']
+            exclude_columns = self.target_features + [col for col in non_feature_columns if col in self.data.columns]
             self.input_features = [col for col in self.data.columns if col not in exclude_columns]
+            
+            # Add cyclical time features if available
+            time_features = [
+                'hour_sin', 'hour_cos', 'day_of_week_sin', 'day_of_week_cos',
+                'month_sin', 'month_cos', 'day_of_month_sin', 'day_of_month_cos'
+            ]
+            self.input_features += [f for f in time_features if f in self.data.columns]
         
         data_type = "hourly" if self.is_hourly else "daily"
         print(f"Using {len(self.input_features)} input features: {self.input_features} (data type: {data_type})")
@@ -43,6 +99,11 @@ class CHPDataset(Dataset):
         # Normalize the data
         self.scalers = {}
         for feature in self.input_features + self.target_features:
+            # Skip cyclical features that are already normalized
+            if any(feature.endswith(suffix) for suffix in ['_sin', '_cos']):
+                self.scalers[feature] = {'mean': 0, 'std': 1}
+                continue
+                
             mean = self.data[feature].mean()
             std = self.data[feature].std()
             # Handle constant features (std=0)

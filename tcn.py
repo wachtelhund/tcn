@@ -36,18 +36,28 @@ class TemporalBlock(nn.Module):
         return self.relu(out + res)
 
 class TemporalConvNet(nn.Module):
-    def __init__(self, num_inputs, num_outputs, num_channels=None, kernel_size=None, dropout=None):
+    def __init__(self, num_inputs, num_outputs, num_channels=None, kernel_size=None, dropout=None, dilation_base=None):
         super(TemporalConvNet, self).__init__()
         
         # Use config values if not specified
         num_channels = num_channels or MODEL_CONFIG['num_channels']
         kernel_size = kernel_size or MODEL_CONFIG['kernel_size']
         dropout = dropout or MODEL_CONFIG['dropout']
+        dilation_base = dilation_base or MODEL_CONFIG.get('dilation_base', 2)
         
         layers = []
         num_levels = len(num_channels)
+        
+        # Calculate the receptive field
+        receptive_field = 1
         for i in range(num_levels):
-            dilation = 2 ** i
+            dilation = dilation_base ** i
+            receptive_field += 2 * (kernel_size - 1) * dilation
+        
+        print(f"TCN Receptive Field: {receptive_field} time steps")
+        
+        for i in range(num_levels):
+            dilation = dilation_base ** i
             in_channels = num_inputs if i == 0 else num_channels[i-1]
             out_channels = num_channels[i]
             layers.append(TemporalBlock(in_channels, out_channels, kernel_size, stride=1, dilation=dilation,

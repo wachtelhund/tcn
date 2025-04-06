@@ -25,25 +25,34 @@ DATA_CONFIG = {
     'input_features': ['meantemp', 'humidity', 'wind_speed', 'meanpressure'],
     
     # Time series configuration
-    'sequence_length': 7,  # How many time steps to use for prediction (7 days)
-    'forecast_horizon': 60,  # Number of future time steps to predict (7 days)
-    'is_hourly': False,     # Using daily data
+    'sequence_length': 168,  # How many time steps to use for prediction (7 days * 24 hours)
+    'forecast_horizon': 24,  # Number of future time steps to predict (24 hours)
+    'is_hourly': True,     # Using hourly data
+    
+    # Temporal feature extraction
+    'add_time_features': True,  # Add hour of day, day of week, month features
+    'add_cyclical_features': True,  # Add sin/cos transforms of time features
 }
 
 # Model configuration
 MODEL_CONFIG = {
     'batch_size': 32,
-    'num_channels': [64, 64, 32, 32],  # Channel sizes for TCN layers
-    'kernel_size': 3,                   # Kernel size for TCN
-    'dropout': 0.2,                     # Dropout rate
+    'num_channels': [128, 128, 64, 64, 32],  # Deeper channel sizes for TCN layers
+    'kernel_size': 7,                   # Larger kernel size to capture daily patterns
+    'dropout': 0.2,                     # Reduced dropout for better training stability
+    'dilation_base': 2,                 # Base for dilation factor (2^i)
 }
 
 # Training configuration
 TRAINING_CONFIG = {
     'num_epochs': 200,
     'learning_rate': 0.001,
-    'patience': 10,                     # Early stopping patience
+    'patience': 15,                     # Increased early stopping patience
     'checkpoint_dir': 'checkpoints',    # Directory to save models
+    'weight_decay': 1e-6,               # Reduced L2 regularization to prevent underfitting
+    'lr_scheduler': 'reduce_plateau',   # Learning rate scheduler type
+    'reduce_factor': 0.5,               # Factor by which to reduce learning rate
+    'reduce_patience': 7,               # Patience for learning rate scheduler
 }
 
 # Visualization configuration
