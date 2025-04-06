@@ -101,19 +101,39 @@ def plot_predictions(model, test_loader, scalers, target_features):
     # Create plots directory
     os.makedirs(VIZ_CONFIG['save_dir'], exist_ok=True)
     
-    # Plot each target feature
-    plt.figure(figsize=(15, 5))
+    # Generate timestamp for filenames
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Create a separate plot for each target feature
     for i, feature in enumerate(target_features):
-        plt.subplot(1, len(target_features), i+1)
+        # Calculate MSE and RMSE
+        mse = np.mean((predictions[:, i] - actuals[:, i])**2)
+        rmse = np.sqrt(mse)
+        
+        # Print metrics
+        print(f"\nMetrics for {feature}:")
+        print(f"  MSE: {mse:.4f}")
+        print(f"  RMSE: {rmse:.4f}")
+        
+        plt.figure(figsize=(12, 6))
         plt.plot(actuals[:, i], label='Actual')
         plt.plot(predictions[:, i], label='Predicted')
-        plt.title(feature)
+        plt.title(f'Predictions for {feature} (MSE: {mse:.4f}, RMSE: {rmse:.4f})')
+        plt.xlabel('Time')
+        plt.ylabel(feature)
         plt.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(VIZ_CONFIG['save_dir'], 'predictions.png'))
-    plt.close()
+        plt.grid(True)
+        
+        # Save with timestamp in filename
+        filename = f"{feature}_{timestamp}.png"
+        filepath = os.path.join(VIZ_CONFIG['save_dir'], filename)
+        plt.savefig(filepath)
+        plt.close()
+        
+        print(f"Saved {feature} plot to {filepath}")
     
-    print(f"Saved prediction plots to {VIZ_CONFIG['save_dir']}/predictions.png")
+    # Return timestamp for potential use in loss plot
+    return timestamp
 
 def main():
     # Get configuration
@@ -157,9 +177,10 @@ def main():
     # Train model
     train_losses, test_losses = train_model(model, train_loader, test_loader)
     
-    # Plot predictions
+    # Plot predictions and get timestamp
+    timestamp = None
     if VIZ_CONFIG['plot_predictions']:
-        plot_predictions(model, test_loader, scalers, target_features)
+        timestamp = plot_predictions(model, test_loader, scalers, target_features)
     
     # Plot losses
     if VIZ_CONFIG['plot_losses']:
@@ -170,9 +191,18 @@ def main():
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
         plt.legend()
-        plt.savefig(os.path.join(VIZ_CONFIG['save_dir'], 'losses.png'))
+        plt.grid(True)
+        
+        # Use the same timestamp for loss plot
+        if timestamp:
+            loss_filename = f"losses_{timestamp}.png"
+        else:
+            loss_filename = f"losses_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            
+        loss_filepath = os.path.join(VIZ_CONFIG['save_dir'], loss_filename)
+        plt.savefig(loss_filepath)
         plt.close()
-        print(f"Saved loss plots to {VIZ_CONFIG['save_dir']}/losses.png")
+        print(f"Saved loss plot to {loss_filepath}")
 
 if __name__ == '__main__':
     main() 
