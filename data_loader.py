@@ -61,7 +61,8 @@ class CHPDataset(Dataset):
         
         return torch.FloatTensor(sequence), torch.FloatTensor(target)
 
-def load_and_split_data(file_path, date_column, split_date=None, test_ratio=0.2, delimiter=',', datetime_format=None):
+def load_and_split_data(file_path, date_column, split_date=None, test_ratio=0.2, 
+                       delimiter=',', datetime_format=None, decimal='.'):
     """
     Load data from a single file and split it into train and test sets based on date or ratio
     
@@ -72,6 +73,7 @@ def load_and_split_data(file_path, date_column, split_date=None, test_ratio=0.2,
         test_ratio (float): Ratio of data to use for testing if split_date is None
         delimiter (str): Delimiter used in the CSV file (e.g., ',' or ';')
         datetime_format (str, optional): Format for parsing dates (e.g., '%Y-%m-%d %H:%M')
+        decimal (str): Decimal separator character (e.g., '.' or ',')
         
     Returns:
         tuple: (train_data, test_data)
@@ -79,9 +81,19 @@ def load_and_split_data(file_path, date_column, split_date=None, test_ratio=0.2,
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Data file not found: {file_path}")
         
-    # Load data with appropriate delimiter
-    print(f"Loading file with delimiter: '{delimiter}'")
-    data = pd.read_csv(file_path, delimiter=delimiter)
+    # Load data with appropriate delimiter and decimal separator
+    print(f"Loading file with delimiter: '{delimiter}', decimal: '{decimal}'")
+    try:
+        data = pd.read_csv(file_path, delimiter=delimiter, decimal=decimal)
+    except Exception as e:
+        print(f"Error loading data: {e}")
+        # Try to diagnose issues with first few lines
+        with open(file_path, 'r') as f:
+            first_lines = [next(f) for _ in range(5)]
+        print("First few lines of the file:")
+        for i, line in enumerate(first_lines):
+            print(f"Line {i+1}: {line.strip()}")
+        raise
     
     # Ensure date column exists
     if date_column not in data.columns:
@@ -118,7 +130,7 @@ def load_and_split_data(file_path, date_column, split_date=None, test_ratio=0.2,
 def get_data_loaders(train_file=None, test_file=None, batch_size=32, sequence_length=None, 
                     target_features=None, input_features=None, single_file=None,
                     date_column=None, train_test_split_date=None, test_ratio=None,
-                    delimiter=None, datetime_format=None):
+                    delimiter=None, datetime_format=None, decimal=None):
     """
     Create data loaders for training and testing.
     
@@ -135,6 +147,7 @@ def get_data_loaders(train_file=None, test_file=None, batch_size=32, sequence_le
         test_ratio (float): Ratio to use for test data if no split date
         delimiter (str): Delimiter used in the CSV file (e.g., ',' or ';')
         datetime_format (str): Format for parsing dates
+        decimal (str): Decimal separator character (e.g., '.' or ',')
     
     Returns:
         tuple: (train_loader, test_loader, scalers)
@@ -148,6 +161,7 @@ def get_data_loaders(train_file=None, test_file=None, batch_size=32, sequence_le
     test_ratio = test_ratio or DATA_CONFIG['test_ratio']
     delimiter = delimiter or DATA_CONFIG['delimiter']
     datetime_format = datetime_format or DATA_CONFIG['datetime_format']
+    decimal = decimal or DATA_CONFIG['decimal']
     
     sequence_length = sequence_length or DATA_CONFIG['sequence_length']
     target_features = target_features or DATA_CONFIG['target_features']
@@ -165,7 +179,8 @@ def get_data_loaders(train_file=None, test_file=None, batch_size=32, sequence_le
             split_date=train_test_split_date, 
             test_ratio=test_ratio,
             delimiter=delimiter,
-            datetime_format=datetime_format
+            datetime_format=datetime_format,
+            decimal=decimal
         )
         
         # Create datasets
@@ -177,10 +192,10 @@ def get_data_loaders(train_file=None, test_file=None, batch_size=32, sequence_le
         print(f"  Test file: {test_file}")
         print(f"  Sequence length: {sequence_length}")
         
-        # Load train data with appropriate delimiter
+        # Load train data with appropriate delimiter and decimal
         if not os.path.exists(train_file):
             raise FileNotFoundError(f"Train file not found: {train_file}")
-        train_data = pd.read_csv(train_file, delimiter=delimiter)
+        train_data = pd.read_csv(train_file, delimiter=delimiter, decimal=decimal)
         
         # Convert date column to datetime if present
         if date_column in train_data.columns:
@@ -189,10 +204,10 @@ def get_data_loaders(train_file=None, test_file=None, batch_size=32, sequence_le
             else:
                 train_data[date_column] = pd.to_datetime(train_data[date_column])
         
-        # Load test data with appropriate delimiter
+        # Load test data with appropriate delimiter and decimal
         if not os.path.exists(test_file):
             raise FileNotFoundError(f"Test file not found: {test_file}")
-        test_data = pd.read_csv(test_file, delimiter=delimiter)
+        test_data = pd.read_csv(test_file, delimiter=delimiter, decimal=decimal)
         
         # Convert date column to datetime if present
         if date_column in test_data.columns:
