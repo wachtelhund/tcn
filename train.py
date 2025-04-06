@@ -168,25 +168,25 @@ def plot_predictions(model, test_loader, scalers, target_features):
     
     # Create a separate plot for each target feature
     for i, feature in enumerate(target_features):
-        # Calculate MSE and RMSE for the limited forecast horizon, not all predictions
+        # Calculate RMSE and MAE for the limited forecast horizon, not all predictions
         # Use only as many predictions as specified by forecast_horizon
         if len(denorm_actuals) > forecast_horizon:
-            forecast_mse = np.mean((denorm_predictions[:forecast_horizon, i] - denorm_actuals[:forecast_horizon, i])**2)
-            forecast_rmse = np.sqrt(forecast_mse)
+            forecast_rmse = np.sqrt(np.mean((denorm_predictions[:forecast_horizon, i] - denorm_actuals[:forecast_horizon, i])**2))
+            forecast_mae = np.mean(np.abs(denorm_predictions[:forecast_horizon, i] - denorm_actuals[:forecast_horizon, i]))
         else:
-            forecast_mse = np.mean((denorm_predictions[:, i] - denorm_actuals[:, i])**2)
-            forecast_rmse = np.sqrt(forecast_mse)
+            forecast_rmse = np.sqrt(np.mean((denorm_predictions[:, i] - denorm_actuals[:, i])**2))
+            forecast_mae = np.mean(np.abs(denorm_predictions[:, i] - denorm_actuals[:, i]))
         
         # Calculate metrics for all predictions (for comparison)
-        full_mse = np.mean((denorm_predictions[:, i] - denorm_actuals[:, i])**2)
-        full_rmse = np.sqrt(full_mse)
+        full_rmse = np.sqrt(np.mean((denorm_predictions[:, i] - denorm_actuals[:, i])**2))
+        full_mae = np.mean(np.abs(denorm_predictions[:, i] - denorm_actuals[:, i]))
         
         # Print metrics
         print(f"\nMetrics for {feature}:")
-        print(f"  {forecast_horizon}-step Forecast MSE: {forecast_mse:.4f}")
         print(f"  {forecast_horizon}-step Forecast RMSE: {forecast_rmse:.4f}")
-        print(f"  Full Test Set MSE: {full_mse:.4f}")
+        print(f"  {forecast_horizon}-step Forecast MAE: {forecast_mae:.4f}")
         print(f"  Full Test Set RMSE: {full_rmse:.4f}")
+        print(f"  Full Test Set MAE: {full_mae:.4f}")
         
         plt.figure(figsize=(12, 6))
         
@@ -238,7 +238,7 @@ def plot_predictions(model, test_loader, scalers, target_features):
             plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
         
         title_text = f'Predictions for {feature}'
-        title_text += f' ({forecast_horizon}-step Forecast RMSE: {forecast_rmse:.4f})'
+        title_text += f' ({forecast_horizon}-step Forecast RMSE: {forecast_rmse:.4f}, MAE: {forecast_mae:.4f})'
         plt.title(title_text)
         plt.xlabel('Time')
         plt.ylabel(feature)
