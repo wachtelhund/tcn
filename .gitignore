@@ -9,3 +9,6 @@ checkpoints/
 
 #plots
 plots/
+
+#config
+config.py

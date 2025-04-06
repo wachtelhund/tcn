@@ -253,6 +253,87 @@ def plot_predictions(model, test_loader, scalers, target_features):
         
         print(f"Saved {feature} plot to {filepath}")
     
+    # Create a combined plot with all sensors
+    plt.figure(figsize=(14, 8))
+    
+    # Define colors for different sensors
+    colors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink', 'gray', 'olive', 'cyan']
+    
+    if has_dates and len(dates) == len(raw_actuals):
+        # Only show the forecast horizon in the plot
+        limited_dates = dates[:forecast_horizon] if len(dates) > forecast_horizon else dates
+        limited_actuals = raw_actuals[:forecast_horizon] if len(raw_actuals) > forecast_horizon else raw_actuals
+        limited_preds = denorm_predictions[:forecast_horizon] if len(denorm_predictions) > forecast_horizon else denorm_predictions
+        
+        # Plot each sensor with its actual and forecast
+        for i, feature in enumerate(target_features):
+            color_idx = i % len(colors)
+            # Actual as solid line
+            plt.plot(limited_dates, limited_actuals[:, i], 
+                     label=f'Actual Sensor {i+1}', 
+                     color=colors[color_idx], 
+                     linewidth=2)
+            
+            # Forecast as dotted line
+            plt.plot(limited_dates, limited_preds[:, i], 
+                     label=f'Forecast Sensor {i+1}', 
+                     color=colors[color_idx], 
+                     linestyle='--', 
+                     linewidth=2)
+        
+        # Format x-axis to show dates
+        if is_hourly:
+            plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+            plt.gca().xaxis.set_major_locator(mdates.HourLocator(interval=4))
+        else:
+            plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+            if len(limited_dates) > 50:
+                plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=max(1, len(limited_dates)//10)))
+            else:
+                plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
+        
+        # Automatically rotate date labels
+        fig = plt.gcf()
+        fig.autofmt_xdate()
+    else:
+        # Fallback to index-based plotting
+        limited_actuals = raw_actuals[:forecast_horizon] if len(raw_actuals) > forecast_horizon else raw_actuals
+        limited_preds = denorm_predictions[:forecast_horizon] if len(denorm_predictions) > forecast_horizon else denorm_predictions
+        x_values = range(len(limited_preds))
+        
+        # Plot each sensor with its actual and forecast
+        for i, feature in enumerate(target_features):
+            color_idx = i % len(colors)
+            # Actual as solid line
+            plt.plot(x_values, limited_actuals[:, i], 
+                     label=f'Actual Sensor {i+1}', 
+                     color=colors[color_idx], 
+                     linewidth=2)
+            
+            # Forecast as dotted line
+            plt.plot(x_values, limited_preds[:, i], 
+                     label=f'Forecast Sensor {i+1}', 
+                     color=colors[color_idx], 
+                     linestyle='--', 
+                     linewidth=2)
+        
+        # Use integer ticks for x-axis
+        plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+    
+    plt.title(f'Combined Predictions for All Sensors ({forecast_horizon}-step Forecast)')
+    plt.xlabel('Time')
+    plt.ylabel('Value')
+    plt.legend()
+    plt.grid(True)
+    
+    # Save the combined plot
+    combined_filename = f"combined_sensors_{timestamp}.png"
+    combined_filepath = os.path.join(VIZ_CONFIG['save_dir'], combined_filename)
+    plt.savefig(combined_filepath)
+    plt.close()
+    
+    print(f"Saved combined sensors plot to {combined_filepath}")
+    
     # Return timestamp for potential use in loss plot
     return timestamp
 
