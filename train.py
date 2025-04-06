@@ -5,6 +5,8 @@ from tcn import TemporalConvNet
 from data_loader import get_data_loaders
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.ticker import MaxNLocator
 from datetime import datetime
 import os
 from config import DATA_CONFIG, MODEL_CONFIG, TRAINING_CONFIG, VIZ_CONFIG
@@ -83,6 +85,11 @@ def plot_predictions(model, test_loader, scalers, target_features):
     model.eval()
     predictions = []
     actuals = []
+    dates = []
+    
+    # Check if we have date column in the dataset
+    date_column = DATA_CONFIG['date_column']
+    has_dates = hasattr(test_loader.dataset, 'data') and date_column in test_loader.dataset.data.columns
     
     with torch.no_grad():
         for batch_x, batch_y in test_loader:
@@ -92,6 +99,14 @@ def plot_predictions(model, test_loader, scalers, target_features):
     
     predictions = np.concatenate(predictions)
     actuals = np.concatenate(actuals)
+    
+    # Get dates for x-axis if available
+    if has_dates:
+        # Get dates from the test dataset, skipping sequence_length entries at the beginning
+        dates = test_loader.dataset.data[date_column].iloc[test_loader.dataset.sequence_length:].reset_index(drop=True)
+        # Make sure we have the right number of dates
+        if len(dates) > len(actuals):
+            dates = dates[:len(actuals)]
     
     # Denormalize the data
     for i, feature in enumerate(target_features):
@@ -116,8 +131,31 @@ def plot_predictions(model, test_loader, scalers, target_features):
         print(f"  RMSE: {rmse:.4f}")
         
         plt.figure(figsize=(12, 6))
-        plt.plot(actuals[:, i], label='Actual')
-        plt.plot(predictions[:, i], label='Predicted')
+        
+        if has_dates and len(dates) == len(actuals):
+            # Plot with dates on x-axis
+            plt.plot(dates, actuals[:, i], label='Actual')
+            plt.plot(dates, predictions[:, i], label='Predicted')
+            
+            # Format x-axis to show dates in 24-hour format
+            plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+            
+            # Automatically rotate date labels for better readability
+            fig = plt.gcf()
+            fig.autofmt_xdate()
+            
+            # Set number of ticks based on data length
+            if len(dates) > 50:
+                plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=max(1, len(dates)//50)))
+            else:
+                plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
+        else:
+            # Fallback to index-based plotting if dates are not available
+            plt.plot(actuals[:, i], label='Actual')
+            plt.plot(predictions[:, i], label='Predicted')
+            # Use integer ticks for x-axis
+            plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+        
         plt.title(f'Predictions for {feature} (MSE: {mse:.4f}, RMSE: {rmse:.4f})')
         plt.xlabel('Time')
         plt.ylabel(feature)
