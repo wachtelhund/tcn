@@ -94,9 +94,20 @@ def plot_predictions(model, test_loader, scalers, target_features):
     is_hourly = DATA_CONFIG.get('is_hourly', False)
     forecast_horizon = DATA_CONFIG.get('forecast_horizon', 7 if not is_hourly else 24)
     
+    # Store indices for accessing raw data later
+    indices = []
+    
     with torch.no_grad():
         # Get input data from the last batch for forecasting
-        for batch_x, batch_y in test_loader:
+        idx_offset = test_loader.dataset.sequence_length
+        for batch_idx, (batch_x, batch_y) in enumerate(test_loader):
+            # Keep track of indices for this batch
+            if hasattr(test_loader.dataset, 'raw_data'):
+                batch_size = batch_x.shape[0]
+                start_idx = batch_idx * test_loader.batch_size + idx_offset
+                end_idx = start_idx + batch_size
+                indices.extend(list(range(start_idx, end_idx)))
+            
             last_batch_x = batch_x
             outputs = model(batch_x.transpose(1, 2))
             predictions.append(outputs[:, -1].numpy())
@@ -114,10 +125,40 @@ def plot_predictions(model, test_loader, scalers, target_features):
         if len(dates) > len(actuals):
             dates = dates[:len(actuals)]
     
-    # Denormalize the data
+    # Denormalize the predictions and actuals for metrics calculation
+    denorm_predictions = np.zeros_like(predictions)
+    denorm_actuals = np.zeros_like(actuals)
+    
     for i, feature in enumerate(target_features):
-        predictions[:, i] = predictions[:, i] * scalers[feature]['std'] + scalers[feature]['mean']
-        actuals[:, i] = actuals[:, i] * scalers[feature]['std'] + scalers[feature]['mean']
+        denorm_predictions[:, i] = predictions[:, i] * scalers[feature]['std'] + scalers[feature]['mean']
+        denorm_actuals[:, i] = actuals[:, i] * scalers[feature]['std'] + scalers[feature]['mean']
+    
+    # Get raw data for visualization if available
+    raw_actuals = None
+    if hasattr(test_loader.dataset, 'raw_data') and indices:
+        raw_actuals = np.zeros_like(denorm_actuals)
+        for i, feature in enumerate(target_features):
+            raw_values = test_loader.dataset.raw_data[feature].values[indices]
+            if len(raw_values) == len(denorm_actuals):
+                raw_actuals[:, i] = raw_values
+                # Apply the same exact transformation to predictions to match raw values scale
+                # This ensures predictions are on the same scale as raw actuals
+                if raw_values.mean() != denorm_actuals[:, i].mean() or raw_values.std() != denorm_actuals[:, i].std():
+                    # Calculate the adjustment factor from denormalized to raw values
+                    denorm_mean = denorm_actuals[:, i].mean()
+                    denorm_std = denorm_actuals[:, i].std() if denorm_actuals[:, i].std() > 0 else 1
+                    raw_mean = raw_values.mean()
+                    raw_std = raw_values.std() if raw_values.std() > 0 else 1
+                    
+                    # Adjust predictions to match the raw data scale
+                    denorm_predictions[:, i] = ((denorm_predictions[:, i] - denorm_mean) / denorm_std * raw_std) + raw_mean
+            else:
+                # Fallback to denormalized values if sizes don't match
+                raw_actuals = denorm_actuals
+                break
+    else:
+        # Use denormalized values if raw data is not available
+        raw_actuals = denorm_actuals
     
     # Create plots directory
     os.makedirs(VIZ_CONFIG['save_dir'], exist_ok=True)
@@ -129,15 +170,15 @@ def plot_predictions(model, test_loader, scalers, target_features):
     for i, feature in enumerate(target_features):
         # Calculate MSE and RMSE for the limited forecast horizon, not all predictions
         # Use only as many predictions as specified by forecast_horizon
-        if len(actuals) > forecast_horizon:
-            forecast_mse = np.mean((predictions[:forecast_horizon, i] - actuals[:forecast_horizon, i])**2)
+        if len(denorm_actuals) > forecast_horizon:
+            forecast_mse = np.mean((denorm_predictions[:forecast_horizon, i] - denorm_actuals[:forecast_horizon, i])**2)
             forecast_rmse = np.sqrt(forecast_mse)
         else:
-            forecast_mse = np.mean((predictions[:, i] - actuals[:, i])**2)
+            forecast_mse = np.mean((denorm_predictions[:, i] - denorm_actuals[:, i])**2)
             forecast_rmse = np.sqrt(forecast_mse)
         
         # Calculate metrics for all predictions (for comparison)
-        full_mse = np.mean((predictions[:, i] - actuals[:, i])**2)
+        full_mse = np.mean((denorm_predictions[:, i] - denorm_actuals[:, i])**2)
         full_rmse = np.sqrt(full_mse)
         
         # Print metrics
@@ -149,11 +190,11 @@ def plot_predictions(model, test_loader, scalers, target_features):
         
         plt.figure(figsize=(12, 6))
         
-        if has_dates and len(dates) == len(actuals):
+        if has_dates and len(dates) == len(raw_actuals):
             # Only show the forecast horizon in the plot
             limited_dates = dates[:forecast_horizon] if len(dates) > forecast_horizon else dates
-            limited_actuals = actuals[:forecast_horizon] if len(actuals) > forecast_horizon else actuals
-            limited_preds = predictions[:forecast_horizon] if len(predictions) > forecast_horizon else predictions
+            limited_actuals = raw_actuals[:forecast_horizon] if len(raw_actuals) > forecast_horizon else raw_actuals
+            limited_preds = denorm_predictions[:forecast_horizon] if len(denorm_predictions) > forecast_horizon else denorm_predictions
             
             unit = "hours" if is_hourly else "days"
             
@@ -186,8 +227,8 @@ def plot_predictions(model, test_loader, scalers, target_features):
         else:
             # Fallback to index-based plotting if dates are not available
             # Limit to forecast horizon for both actuals and predictions
-            limited_actuals = actuals[:forecast_horizon] if len(actuals) > forecast_horizon else actuals
-            limited_preds = predictions[:forecast_horizon] if len(predictions) > forecast_horizon else predictions
+            limited_actuals = raw_actuals[:forecast_horizon] if len(raw_actuals) > forecast_horizon else raw_actuals
+            limited_preds = denorm_predictions[:forecast_horizon] if len(denorm_predictions) > forecast_horizon else denorm_predictions
             x_values = range(len(limited_preds))
             
             plt.plot(x_values, limited_actuals[:, i], label='Actual')

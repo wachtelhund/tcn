@@ -14,7 +14,8 @@ class CHPDataset(Dataset):
             target_features (list): List of target features to predict
             input_features (list): List of input features to use. If None, all non-target columns are used.
         """
-        self.data = data
+        self.data = data.copy()  # Make a copy to avoid modifying the original
+        self.raw_data = data.copy()  # Store the raw data before normalization
         self.sequence_length = sequence_length
         self.target_features = target_features or DATA_CONFIG['target_features']
         self.is_hourly = DATA_CONFIG.get('is_hourly', False)
