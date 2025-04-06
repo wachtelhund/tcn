@@ -6,6 +6,12 @@ DATA_CONFIG = {
     'train_file': './DailyDelhiClimateTrain.csv',
     'test_file': './DailyDelhiClimateTest.csv',
     
+    # Single file option (alternative to separate train/test files)
+    'single_file': None,  # Set to path of single file to use instead of train/test files
+    'date_column': 'date',  # Name of date column for splitting
+    'train_test_split_date': None,  # Date to split train/test (e.g., '2017-01-01')
+    'test_ratio': 0.2,  # Used if no split date provided (ratio of data to use for testing)
+    
     # Features configuration
     'target_features': ['meantemp', 'humidity', 'wind_speed', 'meanpressure'],
     

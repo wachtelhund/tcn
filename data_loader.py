@@ -6,18 +6,15 @@ import os
 from config import DATA_CONFIG
 
 class CHPDataset(Dataset):
-    def __init__(self, csv_file, sequence_length=24, target_features=None, input_features=None):
+    def __init__(self, data, sequence_length=24, target_features=None, input_features=None):
         """
         Args:
-            csv_file (str): Path to the CSV file
+            data (pd.DataFrame): DataFrame containing the data
             sequence_length (int): Number of time steps to use for prediction
             target_features (list): List of target features to predict
             input_features (list): List of input features to use. If None, all non-target columns are used.
         """
-        if not os.path.exists(csv_file):
-            raise FileNotFoundError(f"Data file not found: {csv_file}")
-            
-        self.data = pd.read_csv(csv_file)
+        self.data = data
         self.sequence_length = sequence_length
         self.target_features = target_features or DATA_CONFIG['target_features']
         
@@ -35,7 +32,7 @@ class CHPDataset(Dataset):
                 raise ValueError(f"Input features not found in data: {missing_inputs}")
         else:
             # Use all numeric columns except targets and date
-            exclude_columns = self.target_features + ['date']
+            exclude_columns = self.target_features + [DATA_CONFIG['date_column']]
             self.input_features = [col for col in self.data.columns if col not in exclude_columns]
         
         print(f"Using {len(self.input_features)} input features: {self.input_features}")
@@ -64,8 +61,56 @@ class CHPDataset(Dataset):
         
         return torch.FloatTensor(sequence), torch.FloatTensor(target)
 
+def load_and_split_data(file_path, date_column, split_date=None, test_ratio=0.2):
+    """
+    Load data from a single file and split it into train and test sets based on date or ratio
+    
+    Args:
+        file_path (str): Path to the data file
+        date_column (str): Name of the date column
+        split_date (str, optional): Date to use as split point. If None, test_ratio is used.
+        test_ratio (float): Ratio of data to use for testing if split_date is None
+        
+    Returns:
+        tuple: (train_data, test_data)
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Data file not found: {file_path}")
+        
+    # Load data
+    data = pd.read_csv(file_path)
+    
+    # Ensure date column exists
+    if date_column not in data.columns:
+        raise ValueError(f"Date column '{date_column}' not found in data")
+    
+    # Convert date column to datetime if it's not already
+    data[date_column] = pd.to_datetime(data[date_column])
+    
+    # Sort by date
+    data = data.sort_values(by=date_column)
+    
+    # Split data based on date or ratio
+    if split_date:
+        split_date = pd.to_datetime(split_date)
+        train_data = data[data[date_column] < split_date].copy()
+        test_data = data[data[date_column] >= split_date].copy()
+        print(f"Split data by date: {split_date}")
+        print(f"  Train data: {len(train_data)} records ({train_data[date_column].min()} to {train_data[date_column].max()})")
+        print(f"  Test data: {len(test_data)} records ({test_data[date_column].min()} to {test_data[date_column].max()})")
+    else:
+        split_idx = int(len(data) * (1 - test_ratio))
+        train_data = data.iloc[:split_idx].copy()
+        test_data = data.iloc[split_idx:].copy()
+        print(f"Split data by ratio: {1-test_ratio:.1f}/{test_ratio:.1f}")
+        print(f"  Train data: {len(train_data)} records ({train_data[date_column].min()} to {train_data[date_column].max()})")
+        print(f"  Test data: {len(test_data)} records ({test_data[date_column].min()} to {test_data[date_column].max()})")
+    
+    return train_data, test_data
+
 def get_data_loaders(train_file=None, test_file=None, batch_size=32, sequence_length=None, 
-                    target_features=None, input_features=None):
+                    target_features=None, input_features=None, single_file=None,
+                    date_column=None, train_test_split_date=None, test_ratio=None):
     """
     Create data loaders for training and testing.
     
@@ -76,6 +121,10 @@ def get_data_loaders(train_file=None, test_file=None, batch_size=32, sequence_le
         sequence_length (int): Number of time steps to use for prediction
         target_features (list): List of target features to predict
         input_features (list): List of input features to use
+        single_file (str): Path to single data file (overrides train_file and test_file)
+        date_column (str): Name of date column for splitting
+        train_test_split_date (str): Date to split train/test if using single file
+        test_ratio (float): Ratio to use for test data if no split date
     
     Returns:
         tuple: (train_loader, test_loader, scalers)
@@ -83,17 +132,50 @@ def get_data_loaders(train_file=None, test_file=None, batch_size=32, sequence_le
     # Use config values if not specified
     train_file = train_file or DATA_CONFIG['train_file']
     test_file = test_file or DATA_CONFIG['test_file']
+    single_file = single_file or DATA_CONFIG['single_file']
+    date_column = date_column or DATA_CONFIG['date_column']
+    train_test_split_date = train_test_split_date or DATA_CONFIG['train_test_split_date']
+    test_ratio = test_ratio or DATA_CONFIG['test_ratio']
+    
     sequence_length = sequence_length or DATA_CONFIG['sequence_length']
     target_features = target_features or DATA_CONFIG['target_features']
     input_features = input_features or DATA_CONFIG['input_features']
     
-    print(f"\nLoading data from:")
-    print(f"  Train file: {train_file}")
-    print(f"  Test file: {test_file}")
-    print(f"  Sequence length: {sequence_length}")
-    
-    train_dataset = CHPDataset(train_file, sequence_length, target_features, input_features)
-    test_dataset = CHPDataset(test_file, sequence_length, target_features, input_features)
+    # Check if we should use a single file with splitting
+    if single_file:
+        print(f"\nLoading data from single file: {single_file}")
+        print(f"  Sequence length: {sequence_length}")
+        
+        # Load and split data
+        train_data, test_data = load_and_split_data(
+            single_file, 
+            date_column, 
+            split_date=train_test_split_date, 
+            test_ratio=test_ratio
+        )
+        
+        # Create datasets
+        train_dataset = CHPDataset(train_data, sequence_length, target_features, input_features)
+        test_dataset = CHPDataset(test_data, sequence_length, target_features, input_features)
+    else:
+        print(f"\nLoading data from:")
+        print(f"  Train file: {train_file}")
+        print(f"  Test file: {test_file}")
+        print(f"  Sequence length: {sequence_length}")
+        
+        # Load train data
+        if not os.path.exists(train_file):
+            raise FileNotFoundError(f"Train file not found: {train_file}")
+        train_data = pd.read_csv(train_file)
+        
+        # Load test data
+        if not os.path.exists(test_file):
+            raise FileNotFoundError(f"Test file not found: {test_file}")
+        test_data = pd.read_csv(test_file)
+        
+        # Create datasets
+        train_dataset = CHPDataset(train_data, sequence_length, target_features, input_features)
+        test_dataset = CHPDataset(test_data, sequence_length, target_features, input_features)
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
