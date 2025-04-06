@@ -1,0 +1,11 @@
+# Venv
+venv/
+
+# Checkpoints
+checkpoints/
+
+#csv files
+*.csv
+
+#plots
+plots/
