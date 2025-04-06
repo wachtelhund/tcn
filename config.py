@@ -12,6 +12,10 @@ DATA_CONFIG = {
     'train_test_split_date': None,  # Date to split train/test (e.g., '2017-01-01')
     'test_ratio': 0.2,  # Used if no split date provided (ratio of data to use for testing)
     
+    # File format options
+    'delimiter': ',',  # CSV delimiter (use ';' for semicolon-delimited files)
+    'datetime_format': None,  # Format for parsing dates (e.g., '%Y-%m-%d %H:%M' for '2024-01-01 09:00')
+    
     # Features configuration
     'target_features': ['meantemp', 'humidity', 'wind_speed', 'meanpressure'],
     
