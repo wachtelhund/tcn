@@ -26,6 +26,8 @@ DATA_CONFIG = {
     
     # Time series configuration
     'sequence_length': 7,  # How many time steps to use for prediction (7 days)
+    'forecast_horizon': 60,  # Number of future time steps to predict (7 days)
+    'is_hourly': False,     # Using daily data
 }
 
 # Model configuration

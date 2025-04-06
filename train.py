@@ -7,9 +7,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.ticker import MaxNLocator
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from config import DATA_CONFIG, MODEL_CONFIG, TRAINING_CONFIG, VIZ_CONFIG
+import pandas as pd
 
 def train_model(model, train_loader, test_loader, num_epochs=None, learning_rate=None, patience=None):
     # Use config values if not specified
@@ -90,13 +91,18 @@ def plot_predictions(model, test_loader, scalers, target_features):
     # Check if we have date column in the dataset
     date_column = DATA_CONFIG['date_column']
     has_dates = hasattr(test_loader.dataset, 'data') and date_column in test_loader.dataset.data.columns
+    is_hourly = DATA_CONFIG.get('is_hourly', False)
+    forecast_horizon = DATA_CONFIG.get('forecast_horizon', 7 if not is_hourly else 24)
     
     with torch.no_grad():
+        # Get input data from the last batch for forecasting
         for batch_x, batch_y in test_loader:
+            last_batch_x = batch_x
             outputs = model(batch_x.transpose(1, 2))
             predictions.append(outputs[:, -1].numpy())
             actuals.append(batch_y.numpy())
     
+    # For normal prediction evaluation
     predictions = np.concatenate(predictions)
     actuals = np.concatenate(actuals)
     
@@ -121,42 +127,116 @@ def plot_predictions(model, test_loader, scalers, target_features):
     
     # Create a separate plot for each target feature
     for i, feature in enumerate(target_features):
-        # Calculate MSE and RMSE
-        mse = np.mean((predictions[:, i] - actuals[:, i])**2)
-        rmse = np.sqrt(mse)
+        # Calculate MSE and RMSE for the limited forecast horizon, not all predictions
+        # Use only as many predictions as specified by forecast_horizon
+        if len(actuals) > forecast_horizon:
+            forecast_mse = np.mean((predictions[:forecast_horizon, i] - actuals[:forecast_horizon, i])**2)
+            forecast_rmse = np.sqrt(forecast_mse)
+        else:
+            forecast_mse = np.mean((predictions[:, i] - actuals[:, i])**2)
+            forecast_rmse = np.sqrt(forecast_mse)
+        
+        # Calculate metrics for all predictions (for comparison)
+        full_mse = np.mean((predictions[:, i] - actuals[:, i])**2)
+        full_rmse = np.sqrt(full_mse)
         
         # Print metrics
         print(f"\nMetrics for {feature}:")
-        print(f"  MSE: {mse:.4f}")
-        print(f"  RMSE: {rmse:.4f}")
+        print(f"  {forecast_horizon}-step Forecast MSE: {forecast_mse:.4f}")
+        print(f"  {forecast_horizon}-step Forecast RMSE: {forecast_rmse:.4f}")
+        print(f"  Full Test Set MSE: {full_mse:.4f}")
+        print(f"  Full Test Set RMSE: {full_rmse:.4f}")
         
         plt.figure(figsize=(12, 6))
         
         if has_dates and len(dates) == len(actuals):
-            # Plot with dates on x-axis
-            plt.plot(dates, actuals[:, i], label='Actual')
-            plt.plot(dates, predictions[:, i], label='Predicted')
+            # Limit all plots to just the forecast horizon
+            limited_dates = dates[:forecast_horizon] if len(dates) > forecast_horizon else dates
+            limited_actuals = actuals[:forecast_horizon] if len(actuals) > forecast_horizon else actuals
+            limited_preds = predictions[:forecast_horizon] if len(predictions) > forecast_horizon else predictions
             
-            # Format x-axis to show dates in 24-hour format
-            plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+            # Only plot actual values within the forecast horizon
+            plt.plot(limited_dates, limited_actuals[:, i], label='Actual', color='blue')
+            
+            # Only show predictions for the specified forecast horizon
+            unit = "hours" if is_hourly else "days"
+            
+            if is_hourly:
+                # For hourly data
+                last_actual_date = dates.iloc[-1] if len(dates) > 0 else None
+                
+                # Generate future dates
+                future_dates = None
+                if last_actual_date is not None and (isinstance(last_actual_date, datetime) or pd.api.types.is_datetime64_any_dtype(last_actual_date)):
+                    # For hourly data
+                    future_dates = [last_actual_date + timedelta(hours=h+1) for h in range(forecast_horizon)]
+                
+                # Only plot predictions up to the forecast horizon
+                plt.plot(limited_dates, limited_preds[:, i], 
+                         label=f'Predicted ({forecast_horizon} {unit})', color='red')
+                
+                # If we have future dates, plot future predictions
+                if future_dates and len(future_dates) > 0:
+                    # Generate multi-step forecast (same as before)
+                    last_x = last_batch_x[-1:].clone()
+                    future_preds = []
+                    current_input = last_x.clone()
+                    
+                    for step in range(forecast_horizon):
+                        with torch.no_grad():
+                            step_output = model(current_input.transpose(1, 2))
+                            next_pred = step_output[:, -1]
+                        
+                        future_preds.append(next_pred.numpy())
+                        
+                        if step < forecast_horizon - 1:
+                            current_input = current_input.clone()
+                            current_input = torch.cat([current_input[:, 1:, :], next_pred.unsqueeze(1)], dim=1)
+                    
+                    future_preds = np.concatenate(future_preds, axis=0)
+                    future_preds[:, i] = future_preds[:, i] * scalers[feature]['std'] + scalers[feature]['mean']
+                    
+                    plt.plot(future_dates, future_preds[:, i], 
+                             label=f'Future Forecast ({forecast_horizon} {unit})', color='green', linestyle='-')
+            else:
+                # For daily data, limit predictions to forecast_horizon days
+                # Plot limited predictions on actual dates
+                plt.plot(limited_dates, limited_preds[:, i], 
+                         label=f'Predicted ({forecast_horizon} {unit})', color='red')
+            
+            # Format x-axis to show dates
+            if is_hourly:
+                plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+                # Set major ticks to show every few hours
+                plt.gca().xaxis.set_major_locator(mdates.HourLocator(interval=4))
+            else:
+                plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+                # Set number of ticks based on data length
+                if len(limited_dates) > 50:
+                    plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=max(1, len(limited_dates)//10)))
+                else:
+                    plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
             
             # Automatically rotate date labels for better readability
             fig = plt.gcf()
             fig.autofmt_xdate()
-            
-            # Set number of ticks based on data length
-            if len(dates) > 50:
-                plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=max(1, len(dates)//50)))
-            else:
-                plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
         else:
             # Fallback to index-based plotting if dates are not available
-            plt.plot(actuals[:, i], label='Actual')
-            plt.plot(predictions[:, i], label='Predicted')
+            # Limit to forecast horizon for both actuals and predictions
+            limited_actuals = actuals[:forecast_horizon] if len(actuals) > forecast_horizon else actuals
+            limited_preds = predictions[:forecast_horizon] if len(predictions) > forecast_horizon else predictions
+            x_values = range(len(limited_preds))
+            
+            plt.plot(x_values, limited_actuals[:, i], label='Actual')
+            plt.plot(x_values, limited_preds[:, i], 
+                     label=f'Predicted ({forecast_horizon} steps)', color='red')
+            
             # Use integer ticks for x-axis
             plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
         
-        plt.title(f'Predictions for {feature} (MSE: {mse:.4f}, RMSE: {rmse:.4f})')
+        title_text = f'Predictions for {feature}'
+        title_text += f' ({forecast_horizon}-step Forecast RMSE: {forecast_rmse:.4f})'
+        plt.title(title_text)
         plt.xlabel('Time')
         plt.ylabel(feature)
         plt.legend()
@@ -183,6 +263,13 @@ def main():
     sequence_length = DATA_CONFIG['sequence_length']
     target_features = DATA_CONFIG['target_features']
     input_features = DATA_CONFIG['input_features']
+    is_hourly = DATA_CONFIG.get('is_hourly', False)
+    forecast_horizon = DATA_CONFIG.get('forecast_horizon', 24)
+    
+    data_type = "hourly" if is_hourly else "daily"
+    print(f"\nInitializing for {data_type} data with:")
+    print(f"  Sequence length: {sequence_length} time steps")
+    print(f"  Forecast horizon: {forecast_horizon} hours ahead" if is_hourly else f"  Predicting next day")
     
     # Get data loaders
     train_loader, test_loader, scalers = get_data_loaders(

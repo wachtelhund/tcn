@@ -17,6 +17,7 @@ class CHPDataset(Dataset):
         self.data = data
         self.sequence_length = sequence_length
         self.target_features = target_features or DATA_CONFIG['target_features']
+        self.is_hourly = DATA_CONFIG.get('is_hourly', False)
         
         # Validate target features exist in the data
         missing_targets = [f for f in self.target_features if f not in self.data.columns]
@@ -35,7 +36,8 @@ class CHPDataset(Dataset):
             exclude_columns = self.target_features + [DATA_CONFIG['date_column']]
             self.input_features = [col for col in self.data.columns if col not in exclude_columns]
         
-        print(f"Using {len(self.input_features)} input features: {self.input_features}")
+        data_type = "hourly" if self.is_hourly else "daily"
+        print(f"Using {len(self.input_features)} input features: {self.input_features} (data type: {data_type})")
         print(f"Predicting {len(self.target_features)} target features: {self.target_features}")
         
         # Normalize the data
@@ -56,7 +58,7 @@ class CHPDataset(Dataset):
         # Get sequence of input features
         sequence = self.data[self.input_features].iloc[idx:idx + self.sequence_length].values
         
-        # Get target values
+        # Get target values (next time step after the sequence)
         target = self.data[self.target_features].iloc[idx + self.sequence_length].values
         
         return torch.FloatTensor(sequence), torch.FloatTensor(target)
